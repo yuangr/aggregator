@@ -9,9 +9,6 @@ env:
   # time zone
   TZ: Asia/Shanghai
 
-  # force javascript actions to run on node24
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
   # network proxy aggregate config
   SUBSCRIBE_CONF: ${{ secrets.SUBSCRIBE_CONF }}
 
@@ -39,12 +36,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 
       - name: Prepare
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.x"
           architecture: "x64"
