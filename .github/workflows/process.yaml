@@ -9,6 +9,9 @@ env:
   # time zone
   TZ: Asia/Shanghai
 
+  # force javascript actions to run on node24
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
   # network proxy aggregate config
   SUBSCRIBE_CONF: ${{ secrets.SUBSCRIBE_CONF }}
 
