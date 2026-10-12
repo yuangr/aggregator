@@ -93,10 +93,10 @@ def login(url, params, headers, retry, proxy=False) -> dict:
                 headers=headers,
                 allow_redirects=True,
                 proxies=PROXY,
-                verify=False,
+                verify=True, timeout=(10, 30),
             )
         else:
-            response = requests.post(url, data=params, headers=headers, allow_redirects=True)
+            response = requests.post(url, data=params, headers=headers, allow_redirects=True, timeout=(10, 30))
 
         if response.status_code == 200:
             return {str(key).lower(): value for key, value in response.headers.items()}
@@ -117,19 +117,15 @@ def login(url, params, headers, retry, proxy=False) -> dict:
 def checkin(url, headers, retry, proxy=False) -> None:
     try:
         response = (
-            requests.post(url, headers=headers, proxies=PROXY, verify=False)
+            requests.post(url, headers=headers, proxies=PROXY, verify=True, timeout=(10, 30))
             if proxy
-            else requests.post(url, headers=headers)
+            else requests.post(url, headers=headers, timeout=(10, 30))
         )
 
         if response.status_code == 200:
-            key = "Content-Encoding"
             try:
-                data = (
-                    json.loads(brotli.decompress(response.content).decode("utf-8"))
-                    if key in response.headers and response.headers["Content-Encoding"] == "br"
-                    else response.json()
-                )
+                # Requests decodes supported content encodings before JSON parsing.
+                data = response.json()
 
                 logging.info("签到成功 URL: {} {}".format(extract_domain(url), data["msg"]))
             except JSONDecodeError:
@@ -148,7 +144,7 @@ def checkin(url, headers, retry, proxy=False) -> None:
 
 def logout(url, headers) -> int:
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=(10, 30))
         if response.status_code == 200:
             return 0
         else:
