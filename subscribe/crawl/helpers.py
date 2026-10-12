@@ -314,13 +314,13 @@ def is_expired(header: str, remain: float = 0, spare_time: float = 0, tolerance:
                 continue
 
             if "upload" == words[0].strip():
-                upload = eval(words[1])
+                upload = int(words[1].strip())
             elif "download" == words[0].strip():
-                download = eval(words[1])
+                download = int(words[1].strip())
             elif "total" == words[0].strip():
-                total = eval(words[1])
+                total = int(words[1].strip())
             elif "expire" == words[0].strip():
-                expire = None if utils.isblank(words[1]) else eval(words[1])
+                expire = None if utils.isblank(words[1]) else int(words[1].strip())
 
         # 剩余流量大于 ${remain} GB 并且未过期则返回 True，否则返回 False
         flag = total - (upload + download) > remain * pow(1024, 3) and (
