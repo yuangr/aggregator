@@ -27,8 +27,6 @@ HEADER = {
 }
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 PATH = os.path.abspath(os.path.dirname(__file__))
 

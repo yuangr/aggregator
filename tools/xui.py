@@ -28,8 +28,6 @@ from geoip2 import database
 from tqdm import tqdm
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 FILE_LOCK = threading.Lock()
 

@@ -23,8 +23,6 @@ import yaml
 from logger import logger
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 DOWNLOAD_URL = [
     "https://github.com/2dust/v2rayN/releases/latest/download/v2rayN.zip",
