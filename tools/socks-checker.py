@@ -296,7 +296,6 @@ def country_name_zh(country_code: str) -> str:
     return COUNTRY_NAME_ZH.get(country_code.upper(), "")
 
 
-MEITUAN_IP_LOCATE_URL = "https://apimobile.meituan.com/locate/v2/ip/loc?rgeo=true&ip={ip}"
 CHINA_PROVINCE_SUFFIXES = (
     "特别行政区",
     "维吾尔自治区",
@@ -306,6 +305,60 @@ CHINA_PROVINCE_SUFFIXES = (
     "省",
     "市",
 )
+CHINA_PROVINCE_ALIASES = {
+    "anhui": "安徽",
+    "beijing": "北京",
+    "chongqing": "重庆",
+    "fujian": "福建",
+    "gansu": "甘肃",
+    "guangdong": "广东",
+    "guangxi": "广西",
+    "guangxizhuang": "广西",
+    "guizhou": "贵州",
+    "hainan": "海南",
+    "hebei": "河北",
+    "heilongjiang": "黑龙江",
+    "henan": "河南",
+    "hubei": "湖北",
+    "hunan": "湖南",
+    "innermongolia": "内蒙古",
+    "jiangsu": "江苏",
+    "jiangxi": "江西",
+    "jilin": "吉林",
+    "liaoning": "辽宁",
+    "neimenggu": "内蒙古",
+    "neimongol": "内蒙古",
+    "ningxia": "宁夏",
+    "ningxiahuizu": "宁夏",
+    "qinghai": "青海",
+    "shaanxi": "陕西",
+    "shandong": "山东",
+    "shanghai": "上海",
+    "shanxi": "山西",
+    "sichuan": "四川",
+    "tianjin": "天津",
+    "tibet": "西藏",
+    "xinjiang": "新疆",
+    "xinjianguygur": "新疆",
+    "xinjianguyghur": "新疆",
+    "xizang": "西藏",
+    "yunnan": "云南",
+    "zhejiang": "浙江",
+}
+CHINA_MAINLAND_PROVINCES = frozenset(CHINA_PROVINCE_ALIASES.values())
+CHINA_PROVINCE_ALIAS_PREFIXES = tuple(
+    sorted(CHINA_PROVINCE_ALIASES.items(), key=lambda item: len(item[0]), reverse=True)
+)
+CHINA_PROVINCE_EN_SUFFIXES = (
+    "autonomousregion",
+    "municipality",
+    "province",
+    "region",
+    "sheng",
+    "city",
+)
+
+REGION_KEYS = set(["province", "province_name", "region", "region_name", "state", "state_name"])
 
 
 def short_company_name(value: str) -> str:
@@ -501,6 +554,7 @@ class IPLibrary:
         country: str,
         retries: int,
         timeout: int,
+        data: Optional[Dict] = None,
     ) -> str:
         country_code = (country_code or "").upper()
         if country_code != "CN" or not ip:
@@ -509,44 +563,93 @@ class IPLibrary:
         if ip in self._caches:
             return self._caches[ip]
 
-        province = await self._lookup_province(session, ip, retries, timeout)
-        resolved = f"中国{province}" if province else "中国"
+        province = self._extract_province(data)
+        if not province:
+            return "中国"
+
+        resolved = f"中国{province}"
         self._caches[ip] = resolved
         return resolved
 
-    async def _lookup_province(self, session: aiohttp.ClientSession, ip: str, retries: int, timeout: int) -> str:
-        url = MEITUAN_IP_LOCATE_URL.format(ip=quote(ip, safe=""))
-        data, _ = await self._make_request(
-            session=session,
-            url=url,
-            retries=max(1, min(retries, 2)),
-            timeout=max(1, min(timeout, 3)),
-        )
+    def _extract_province(self, data: Optional[Dict]) -> str:
         if not isinstance(data, dict):
             return ""
 
-        payload = data.get("data")
-        if not isinstance(payload, dict):
-            return ""
+        candidates: List[Any] = []
+        for key in REGION_KEYS:
+            candidates.append(data.get(key))
 
-        rgeo = payload.get("rgeo")
-        if not isinstance(rgeo, dict):
-            return ""
+        for parent_key in ("location", "geo"):
+            nested = data.get(parent_key)
+            if isinstance(nested, dict):
+                for key in REGION_KEYS:
+                    candidates.append(nested.get(key))
 
-        country = (rgeo.get("country") or "").strip()
-        if country and country != "中国":
-            return ""
+        for value in candidates:
+            province = self._normalize_province(value)
+            if province:
+                return province
 
-        return self._normalize_province(rgeo.get("province") or "")
+        return ""
 
     @staticmethod
-    def _normalize_province(province: str) -> str:
-        province = (province or "").strip()
+    def _province_alias_key(province: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", province.lower())
+
+    @staticmethod
+    def _match_province_alias(key: str) -> str:
+        if not key or key in {"china", "cn", "mainlandchina", "unknown", "na", "null", "none"}:
+            return ""
+
+        candidates = [key]
+        for suffix in CHINA_PROVINCE_EN_SUFFIXES:
+            if key.endswith(suffix):
+                stripped = key[: -len(suffix)]
+                if stripped:
+                    candidates.append(stripped)
+
+        for candidate in candidates:
+            province = CHINA_PROVINCE_ALIASES.get(candidate)
+            if province:
+                return province
+
+        for candidate in candidates:
+            for alias, province in CHINA_PROVINCE_ALIAS_PREFIXES:
+                if candidate.startswith(alias):
+                    return province
+
+        return ""
+
+    @classmethod
+    def _normalize_province(cls, province: Any) -> str:
+        if isinstance(province, dict):
+            for key in ("name", "name_en", "en", "value"):
+                value = cls._normalize_province(province.get(key))
+                if value:
+                    return value
+
+            return ""
+
+        if not isinstance(province, str):
+            return ""
+
+        province = province.strip()
+        if not province:
+            return ""
+
+        if province.lower() in {"-", "n/a", "na", "none", "null", "unknown"}:
+            return ""
+
         for suffix in CHINA_PROVINCE_SUFFIXES:
             if province.endswith(suffix):
-                return province[: -len(suffix)].strip()
+                province = province[: -len(suffix)].strip()
+                break
 
-        return province
+        if re.search(r"[\u4e00-\u9fff]", province):
+            return province if province in CHINA_MAINLAND_PROVINCES else ""
+
+        key = cls._province_alias_key(province)
+        return cls._match_province_alias(key)
 
 
 class IPInfoLibrary(IPLibrary):
@@ -591,6 +694,7 @@ class IPInfoLibrary(IPLibrary):
             country=country_name_zh(country_code) or country_code or "未知",
             retries=retries,
             timeout=timeout,
+            data=data,
         )
         base = f"{flag} {country}{label}".strip()
         if include_asn_name and company_name:
@@ -675,6 +779,7 @@ class IPPureLibrary(IPLibrary):
             country=country_name_zh(country_code) or (data.get("country") or "未知"),
             retries=retries,
             timeout=timeout,
+            data=data,
         )
 
         company_name = short_company_name(data.get("asOrganization") or "")
@@ -730,6 +835,7 @@ class IP2LocationLibrary(IPLibrary):
             or "未知",
             retries=retries,
             timeout=timeout,
+            data=data,
         )
 
         provider = (data.get("as", "") or data.get("isp", "") or "").strip()
@@ -827,6 +933,7 @@ class IPLarkLibrary(IPLibrary):
             country=country_name_zh(country_code) or (data.get("country_zh") or data.get("country") or "未知"),
             retries=retries,
             timeout=timeout,
+            data=data,
         )
 
         # native if registered country code equals country code else broadcast
@@ -846,6 +953,9 @@ class IPLarkLibrary(IPLibrary):
             detail=detail,
         )
 
+    def _extract_province(self, data: Optional[Dict]) -> str:
+        return ""
+
     async def _fetch(
         self, session: aiohttp.ClientSession, _: ProxyInfo, retries: int, timeout: int
     ) -> Tuple[Optional[Dict], Optional[str]]:
@@ -853,11 +963,246 @@ class IPLarkLibrary(IPLibrary):
         return await self._make_request(session, url, retries, timeout)
 
 
+class IPNetCoffeeLibrary(IPLibrary):
+    name = "ipnetcoffee"
+
+    async def build_remark(
+        self,
+        session: aiohttp.ClientSession,
+        ip: str,
+        data: Dict,
+        include_asn_name: bool,
+        retries: int,
+        timeout: int,
+    ) -> str:
+        label = "家宽" if data.get("isResidential") is True and data.get("company_type", "") != "business" else ""
+
+        country_code = (data.get("countryCode") or "").upper()
+        country = await self._resolve_country(
+            session=session,
+            ip=ip,
+            country_code=country_code,
+            country=country_name_zh(country_code) or (data.get("country") or "未知"),
+            retries=retries,
+            timeout=timeout,
+            data=data,
+        )
+
+        company_name = short_company_name(
+            data.get("asOrganization") or data.get("isp") or data.get("company_name") or ""
+        )
+        score = str(data.get("trust_score")).zfill(3) if "trust_score" in data else "NUL"
+
+        # native if registered country code equals country code else broadcast
+        category = "N" if (data.get("registered_country_code") or "").upper() == country_code else "B"
+
+        return self._format_remark(
+            country_code=country_code,
+            country=country,
+            label=label,
+            include_asn_name=include_asn_name,
+            company_name=company_name,
+            detail=f"{score}::{category}",
+        )
+
+    def _extract_province(self, data: Optional[Dict]) -> str:
+        province = super()._extract_province(data)
+        if province:
+            return province
+
+        if not isinstance(data, dict):
+            return ""
+
+        for source in data.get("geo_sources") or []:
+            if not isinstance(source, dict):
+                continue
+
+            province = self._normalize_province(source.get("region"))
+            if province:
+                return province
+
+        return ""
+
+    async def _resolve_ip(self, session: aiohttp.ClientSession, retries: int, timeout: int) -> Optional[str]:
+        url = "https://ipinfo.io/ip"
+        text, _ = await self._make_request(session, url, retries, timeout, deserialize=False)
+        if not isinstance(text, str):
+            return None
+
+        address = text.strip()
+        try:
+            ipaddress.ip_address(address)
+            return address
+        except ValueError:
+            return None
+
+    async def _fetch(
+        self, session: aiohttp.ClientSession, proxy_info: ProxyInfo, retries: int, timeout: int
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        address = await self._resolve_ip(session, retries, timeout)
+        if not address:
+            host = "" if not proxy_info else proxy_info.host
+            return None, f"Failed to get egress IP, host: {host}"
+
+        url = f"https://ip.net.coffee/api/ip/lookup/{quote(address, safe='')}"
+        data, error = await self._make_request(session, url, retries, timeout)
+        if not data:
+            return None, error or f"Failed to get IP info from ip.net.coffee, ip: {address}"
+
+        return data, None
+
+
+class MeowVPSLibrary(IPLibrary):
+    name = "meowvps"
+
+    async def build_remark(
+        self,
+        session: aiohttp.ClientSession,
+        ip: str,
+        data: Dict,
+        include_asn_name: bool,
+        retries: int,
+        timeout: int,
+    ) -> str:
+        core = data.get("core_data") if isinstance(data.get("core_data"), dict) else {}
+        minfraud = data.get("minfraud") if isinstance(data.get("minfraud"), dict) else {}
+        traits = minfraud.get("traits") if isinstance(minfraud.get("traits"), dict) else {}
+
+        country_code = (core.get("country_code") or "").upper()
+        country = await self._resolve_country(
+            session=session,
+            ip=ip,
+            country_code=country_code,
+            country=country_name_zh(country_code) or minfraud.get("country") or core.get("country") or "未知",
+            retries=retries,
+            timeout=timeout,
+            data=data,
+        )
+
+        company_name = short_company_name(core.get("as_name") or traits.get("isp") or core.get("as_domain") or "")
+        scores = self._nested(data, "risk_assessment", "ipdata", "scores")
+        score = str(scores.get("trust_score")).zfill(3) if "trust_score" in scores else "NUL"
+
+        registered = (minfraud.get("registered_country") or "").strip()
+        current = (minfraud.get("country") or "").strip()
+        category = "N" if registered and current and registered == current else "B"
+
+        return self._format_remark(
+            country_code=country_code,
+            country=country,
+            label=self._build_label(data),
+            include_asn_name=include_asn_name,
+            company_name=company_name,
+            detail=f"{score}::{category}",
+        )
+
+    @staticmethod
+    def _nested(data: Optional[Dict], *keys: str) -> Dict:
+        current: Any = data
+        for key in keys:
+            if not isinstance(current, dict):
+                return {}
+            current = current.get(key)
+        return current if isinstance(current, dict) else {}
+
+    @classmethod
+    def _build_label(cls, data: Dict) -> str:
+        digital = cls._nested(data, "api4", "digital")
+        traits = cls._nested(data, "minfraud", "traits")
+        digital_type = "" if digital.get("type") is None else str(digital.get("type")).strip().lower()
+        user_type = str(traits.get("user_type") or "").strip().lower()
+
+        if digital_type == "edu" or user_type in {"college", "education", "edu"}:
+            return "教育"
+
+        if cls._is_residential(digital_type, user_type, data):
+            return "家宽"
+
+        return ""
+
+    @classmethod
+    def _is_residential(cls, digital_type: str, user_type: str, data: Dict) -> bool:
+        # Verified against representative IPs: empty api4.digital.type usually means ISP/residential, but 114.114.114.114 also has empty type while user_type/hosting/datacenter say DC
+        if digital_type in {"hosting", "edu"}:
+            return False
+        if user_type in {"hosting", "content_delivery_network", "college"}:
+            return False
+        if user_type in {"residential", "traveler", "cellular"}:
+            return True
+        if digital_type:
+            return False
+
+        ipapi = cls._nested(data, "risk_assessment", "ipapi")
+        threat = cls._nested(data, "risk_assessment", "ipdata", "threat")
+        if ipapi.get("hosting") is True or threat.get("is_datacenter") is True:
+            return False
+
+        return True
+
+    def _extract_province(self, data: Optional[Dict]) -> str:
+        province = super()._extract_province(data)
+        if province:
+            return province
+
+        minfraud = data.get("minfraud") if isinstance(data, dict) else None
+        if not isinstance(minfraud, dict):
+            return ""
+
+        for item in minfraud.get("subdivisions") or []:
+            province = self._normalize_province(item)
+            if province:
+                return province
+
+        return ""
+
+    async def _resolve_ip(self, session: aiohttp.ClientSession, retries: int, timeout: int) -> Optional[str]:
+        url = "https://ipinfo.io/ip"
+        text, _ = await self._make_request(session, url, retries, timeout, deserialize=False)
+        if not isinstance(text, str):
+            return None
+
+        address = text.strip()
+        try:
+            ipaddress.ip_address(address)
+            return address
+        except ValueError:
+            return None
+
+    async def _fetch(
+        self, session: aiohttp.ClientSession, proxy_info: ProxyInfo, retries: int, timeout: int
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        address = await self._resolve_ip(session, retries, timeout)
+        if not address:
+            host = "" if not proxy_info else proxy_info.host
+            return None, f"Failed to get egress IP, host: {host}"
+
+        url = f"https://meowvps.com/api/ip-aggregator/{quote(address, safe='')}"
+        headers = {
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.8",
+            "Origin": "https://meowvps.com",
+            "Referer": "https://meowvps.com/tools/ip-check/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/152.0.0.0 Safari/537.36"
+            ),
+        }
+        data, error = await self._make_request(session, url, retries, timeout, headers=headers)
+        if not data:
+            return None, error or f"Failed to get IP info from meowvps, ip: {address}"
+        if data.get("success") is False:
+            return None, f"MeowVPS lookup failed, ip: {address}"
+
+        return data, None
+
+
 IP_LIBRARIES = {
     "ip2location": IP2LocationLibrary,
     "iplark": IPLarkLibrary,
     "ipinfo": IPInfoLibrary,
+    "ipnetcoffee": IPNetCoffeeLibrary,
     "ippure": IPPureLibrary,
+    "meowvps": MeowVPSLibrary,
 }
 
 
@@ -1466,7 +1811,8 @@ def read_proxies(filepath: str) -> List[str]:
 
         def _parse_yaml(text: str) -> Tuple[Optional[List[str]], Optional[object]]:
             try:
-                data = yaml.safe_load(text)
+                content = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
+                data = yaml.safe_load(content)
             except yaml.YAMLError:
                 return None, None
 
@@ -1578,7 +1924,7 @@ async def main():
         dest="ip_library",
         choices=sorted(IP_LIBRARIES.keys()),
         default="ip2location",
-        help="IP地址数据库服务商: ip2location、iplark、ipinfo 或 ippure (默认: ip2location)",
+        help="IP地址数据库服务商: ip2location、iplark、ipinfo、ipnetcoffee、ippure 或 meowvps (默认: ip2location)",
     )
 
     args = parser.parse_args()
