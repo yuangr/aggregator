@@ -26,8 +26,6 @@ from geoip2 import database
 PATH = os.path.abspath(os.path.dirname(__file__))
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 
 def trim(text: str) -> str:

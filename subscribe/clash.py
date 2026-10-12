@@ -21,8 +21,6 @@ from logger import logger
 from outbound import QuotedStr, endpoint_key, proxy_exists, quoted_scalar
 
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
 
 DOWNLOAD_URL = [
     "https://github.com/2dust/v2rayN/releases/latest/download/v2rayN.zip",
